@@ -1,0 +1,6 @@
+{
+  "name": "TaskRescue",
+  "description": "Intelligent priority-based task rescue with smart notifications, Google Calendar auto-scheduling, and AI productivity insights.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
