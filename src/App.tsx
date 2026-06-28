@@ -120,6 +120,7 @@ export default function App() {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [isParsingVoice, setIsParsingVoice] = useState(false);
   const [isVoiceWidgetOpen, setIsVoiceWidgetOpen] = useState(false);
+  const [voiceTextInput, setVoiceTextInput] = useState<string>('');
   const [isCheckingServer, setIsCheckingServer] = useState(false);
   const [serverCheckResult, setServerCheckResult] = useState<{ success: boolean; message: string } | null>(null);
 
@@ -2231,6 +2232,36 @@ export default function App() {
                     <p className="text-[10px] font-bold text-red-500 mt-1 leading-snug">{voiceError}</p>
                   )}
                 </div>
+              </div>
+
+              {/* Text fallback input */}
+              <div className="border-t border-slate-150 dark:border-slate-800/80 pt-3 space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">Or type your request</span>
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!voiceTextInput.trim()) return;
+                    handleVoiceScheduling(voiceTextInput);
+                    setVoiceTextInput('');
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={voiceTextInput}
+                    onChange={(e) => setVoiceTextInput(e.target.value)}
+                    placeholder="e.g. Schedule meeting on Monday at 3pm"
+                    disabled={isParsingVoice}
+                    className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-450 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isParsingVoice || !voiceTextInput.trim()}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 font-bold text-xs text-white rounded-lg cursor-pointer shrink-0 transition-colors"
+                  >
+                    Send
+                  </button>
+                </form>
               </div>
             </motion.div>
           )}

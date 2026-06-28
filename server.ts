@@ -42,15 +42,24 @@ function getAiClient(): GoogleGenAI {
 // Safely clean and parse JSON response from Gemini
 function cleanAndParseJson(text: string): any {
   let cleaned = text.trim();
-  // Remove markdown code blocks if present
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```(json)?\s*/i, '');
-    cleaned = cleaned.replace(/\s*```$/, '');
+  
+  // Try matching markdown code block first
+  const jsonMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (jsonMatch) {
+    cleaned = jsonMatch[1];
+  } else {
+    // Locate first '{' and last '}'
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    }
   }
+  
   return JSON.parse(cleaned.trim());
 }
 
-// Automatically fallback to gemini-3.1-flash-lite if gemini-3.5-flash quota is exhausted
+// Automatically fallback to gemini-3.1-flash-lite if gemini-3.5-flash fails
 async function generateContentWithFallback(prompt: string, config?: any) {
   const aiClient = getAiClient();
   try {
@@ -60,20 +69,18 @@ async function generateContentWithFallback(prompt: string, config?: any) {
       config,
     });
   } catch (error: any) {
-    if (error.status === 429 || (error.message && error.message.includes('Quota exceeded')) || error.status === 403) {
-      console.warn("Primary model 'gemini-3.5-flash' hit rate-limit/quota. Falling back to 'gemini-3.1-flash-lite'...");
-      try {
-        return await aiClient.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
-          contents: prompt,
-          config,
-        });
-      } catch (fallbackError: any) {
-        console.error("Fallback model 'gemini-3.1-flash-lite' also failed:", fallbackError);
-        throw fallbackError;
-      }
+    console.warn("Primary model 'gemini-3.5-flash' failed:", error.message || error);
+    console.warn("Attempting fallback to 'gemini-3.1-flash-lite'...");
+    try {
+      return await aiClient.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: prompt,
+        config,
+      });
+    } catch (fallbackError: any) {
+      console.error("Fallback model 'gemini-3.1-flash-lite' also failed:", fallbackError);
+      throw error; // Throw original error for better diagnostics
     }
-    throw error;
   }
 }
 
