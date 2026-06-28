@@ -34,7 +34,6 @@ import {
 } from 'lucide-react';
 import { Task, TaskPriority, TaskCategory, ProductivityStats, NotificationStatus } from './types';
 import { getTaskNotifications, playChimeSound, showSystemNotification } from './utils/notifications';
-import { initAuthListener, signInWithGoogle, logoutUser } from './firebase';
 import Markdown from 'react-markdown';
 
 // Default tasks seed to make the app interactive on first load
@@ -124,10 +123,21 @@ export default function App() {
   const [isCheckingServer, setIsCheckingServer] = useState(false);
   const [serverCheckResult, setServerCheckResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Authentication & Google Calendar state
-  const [googleUser, setGoogleUser] = useState<{ name: string; email: string; photoURL?: string } | null>(null);
+  // Authentication & Google Calendar state (Local offline profile)
+  const [googleUser, setGoogleUser] = useState<{ name: string; email: string; photoURL?: string } | null>(() => {
+    const saved = localStorage.getItem('taskrescue_user');
+    if (saved) {
+      try { return JSON.parse(saved); } catch { return null; }
+    }
+    return null;
+  });
+  const [onboardingName, setOnboardingName] = useState('');
+  const [onboardingEmail, setOnboardingEmail] = useState('');
+  const [onboardingAvatar, setOnboardingAvatar] = useState('🦸');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [gcalToken, setGcalToken] = useState<string | null>(null);
+  const [gcalToken, setGcalToken] = useState<string | null>(() => {
+    return localStorage.getItem('taskrescue_gcal_token');
+  });
   const [syncHistory, setSyncHistory] = useState<{ id: string; name: string; time: string; status: 'synced' | 'simulated' }[]>(() => {
     const saved = localStorage.getItem('taskrescue_sync_history');
     return saved ? JSON.parse(saved) : [];
@@ -165,25 +175,22 @@ export default function App() {
     localStorage.setItem('taskrescue_sync_history', JSON.stringify(syncHistory));
   }, [syncHistory]);
 
-  // Initialize Firebase Auth listener
+  // Keep local user profile and calendar tokens in sync with local storage
   useEffect(() => {
-    const unsubscribe = initAuthListener(
-      (user, token) => {
-        const userObj = {
-          name: user.displayName || user.email || 'Google User',
-          email: user.email || '',
-          photoURL: user.photoURL || undefined
-        };
-        setGoogleUser(userObj);
-        setGcalToken(token);
-      },
-      () => {
-        setGoogleUser(null);
-        setGcalToken(null);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
+    if (googleUser) {
+      localStorage.setItem('taskrescue_user', JSON.stringify(googleUser));
+    } else {
+      localStorage.removeItem('taskrescue_user');
+    }
+  }, [googleUser]);
+
+  useEffect(() => {
+    if (gcalToken) {
+      localStorage.setItem('taskrescue_gcal_token', gcalToken);
+    } else {
+      localStorage.removeItem('taskrescue_gcal_token');
+    }
+  }, [gcalToken]);
 
   // Check Gemini API Configuration Status
   useEffect(() => {
@@ -706,66 +713,45 @@ export default function App() {
     setActiveTab('inbox');
   };
 
-  // Google Calendar Integration flow
+  // Google Calendar Integration flow (local simulation)
   const handleConnectGCal = async () => {
     setIsSyncing(true);
-    try {
-      const authResult = await signInWithGoogle();
-      if (authResult) {
-        const userObj = {
-          name: authResult.user.displayName || authResult.user.email || 'Google User',
-          email: authResult.user.email || '',
-          photoURL: authResult.user.photoURL || undefined
-        };
-        setGoogleUser(userObj);
-        setGcalToken(authResult.accessToken);
-        
-        // Play soft chime on successful connection
-        playChimeSound();
-        showSystemNotification("Calendar Connected!", `TaskRescue is now synced with ${userObj.email}`);
-      }
-    } catch (error: any) {
-      console.error('Failed to connect Google Calendar:', error);
-      alert(`Connection failed: ${error.message || error}`);
-    } finally {
+    setTimeout(() => {
+      const token = `local-sim-gcal-token-${Date.now()}`;
+      setGcalToken(token);
+      
+      // Play soft chime on successful connection
+      playChimeSound();
+      showSystemNotification("Calendar Connected!", `TaskRescue is now synced with your calendar.`);
       setIsSyncing(false);
-    }
+    }, 800);
   };
 
-  // Google Authentication Gate Logic
-  const handleGoogleLogin = async () => {
+  // Local Profile creation handler instead of Google login
+  const handleLocalProfileLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onboardingName.trim()) return;
+
     setIsLoggingIn(true);
-    try {
-      const authResult = await signInWithGoogle();
-      if (authResult) {
-        const userObj = {
-          name: authResult.user.displayName || authResult.user.email || 'Google User',
-          email: authResult.user.email || '',
-          photoURL: authResult.user.photoURL || undefined
-        };
-        setGoogleUser(userObj);
-        setGcalToken(authResult.accessToken);
-        
-        // Play soft chime on successful login
-        playChimeSound();
-        showSystemNotification("Welcome!", `Signed in successfully as ${userObj.name}`);
-      }
-    } catch (error: any) {
-      console.error('Google login failed:', error);
-      alert(`Login failed: ${error.message || error}`);
-    } finally {
+    setTimeout(() => {
+      const userObj = {
+        name: onboardingName.trim(),
+        email: onboardingEmail.trim() || `${onboardingName.trim().toLowerCase().replace(/\s+/g, '')}@taskrescue.local`,
+        photoURL: onboardingAvatar
+      };
+      setGoogleUser(userObj);
+      setGcalToken(`local-sim-gcal-token-${Date.now()}`);
+      
+      // Play soft chime on successful login
+      playChimeSound();
+      showSystemNotification("Welcome!", `Workspace loaded successfully for ${userObj.name}`);
       setIsLoggingIn(false);
-    }
+    }, 600);
   };
 
   const handleDisconnectGCal = async () => {
-    try {
-      await logoutUser();
-      setGoogleUser(null);
-      setGcalToken(null);
-    } catch (error: any) {
-      console.error('Logout failed:', error);
-    }
+    setGoogleUser(null);
+    setGcalToken(null);
   };
 
   const handleCalendarSync = async (task: Task) => {
@@ -955,7 +941,7 @@ export default function App() {
           </div>
         </motion.div>
 
-        {/* Main Login Card */}
+        {/* Main Onboarding Card */}
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -970,48 +956,79 @@ export default function App() {
             </span>
           </div>
 
-          <div className="text-center mt-4 mb-8">
-            <h2 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight font-sans">Sign In Required</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">Connect your Google Account to initialize task tracking, calendar automated rescue scheduling, and AI coaching insights.</p>
+          <div className="text-center mt-4 mb-6">
+            <h2 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight font-sans">Set Up Your Profile</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
+              TaskRescue is now 100% local and offline-first. Create your local profile to initialize your interactive rescue workspace.
+            </p>
           </div>
 
-          {/* Sign In Button */}
-          <button
-            id="btn-google-login-gate"
-            onClick={handleGoogleLogin}
-            disabled={isLoggingIn}
-            className={`w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-2xl font-bold text-sm text-white transition-all duration-300 shadow-md ${
-              isLoggingIn 
-                ? 'bg-slate-400 cursor-not-allowed' 
-                : 'bg-indigo-600 hover:bg-indigo-750 shadow-indigo-600/10 hover:shadow-indigo-600/20 active:scale-[0.98]'
-            }`}
-          >
-            {isLoggingIn ? (
-              <div className="flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                <span>Authorizing Account...</span>
-              </div>
-            ) : (
-              <>
-                {/* Official Multi-colored Google G Icon */}
-                <svg className="w-4 h-4 bg-white rounded-full p-0.5 shadow-sm" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                </svg>
-                <span>Continue with Google</span>
-              </>
-            )}
-          </button>
+          <form onSubmit={handleLocalProfileLogin} className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Your Name</label>
+              <input
+                type="text"
+                required
+                value={onboardingName}
+                onChange={(e) => setOnboardingName(e.target.value)}
+                placeholder="e.g. Devansh"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+              />
+            </div>
 
-          {/* Terms info */}
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center mt-6 leading-relaxed">
-            By signing in, you authorize TaskRescue to check deadlines, dispatch local chime notifications, and simulate Google Calendar Event creations.
-          </p>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Your Email (Optional)</label>
+              <input
+                type="email"
+                value={onboardingEmail}
+                onChange={(e) => setOnboardingEmail(e.target.value)}
+                placeholder="e.g. dev@example.com"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Choose Avatar Emoji</label>
+              <div className="grid grid-cols-5 gap-2">
+                {['🦸', '🚀', '💻', '🎓', '🎨', '🧘', '🍕', '🐱', '🧠', '💼'].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => setOnboardingAvatar(emoji)}
+                    className={`h-9 rounded-xl flex items-center justify-center text-lg border transition-all cursor-pointer ${
+                      onboardingAvatar === emoji
+                        ? 'bg-indigo-50 border-indigo-400 dark:bg-indigo-950/40 dark:border-indigo-500 scale-105'
+                        : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-950/20 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                    }`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoggingIn || !onboardingName.trim()}
+              className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-2xl font-bold text-sm text-white transition-all duration-300 shadow-md mt-6 ${
+                isLoggingIn || !onboardingName.trim()
+                  ? 'bg-slate-300 dark:bg-slate-800 text-slate-500 cursor-not-allowed shadow-none'
+                  : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/15 hover:shadow-indigo-600/25 active:scale-[0.98]'
+              }`}
+            >
+              {isLoggingIn ? (
+                <div className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <span>Loading Workspace...</span>
+                </div>
+              ) : (
+                <span>Initialize Offline Workspace</span>
+              )}
+            </button>
+          </form>
         </motion.div>
 
         {/* Core Value Props */}
@@ -1110,7 +1127,11 @@ export default function App() {
               </div>
               <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs shadow-inner overflow-hidden">
                 {googleUser.photoURL ? (
-                  <img referrerPolicy="no-referrer" src={googleUser.photoURL} alt={googleUser.name} className="w-full h-full object-cover" />
+                  googleUser.photoURL.length <= 2 ? (
+                    <span className="text-base select-none">{googleUser.photoURL}</span>
+                  ) : (
+                    <img referrerPolicy="no-referrer" src={googleUser.photoURL} alt={googleUser.name} className="w-full h-full object-cover" />
+                  )
                 ) : (
                   googleUser.name.charAt(0)
                 )}
@@ -1131,8 +1152,8 @@ export default function App() {
               className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-slate-900 hover:bg-slate-850 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white shadow-sm transition-all duration-200 cursor-pointer"
             >
               <Calendar className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Connect Google Calendar</span>
-              <span className="sm:hidden">Connect</span>
+              <span className="hidden sm:inline">Sync Calendar</span>
+              <span className="sm:hidden">Sync</span>
             </button>
           )}
         </div>
